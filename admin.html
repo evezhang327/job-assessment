@@ -533,7 +533,7 @@ function renderOptRows(type){
 function normalizeOpts(){const box=document.getElementById('editor-options');box._opts=box._opts.map(o=>typeof o==='string'?{text:o,correct:false}:o);}
 function setOptText(i,v){normalizeOpts();getOptState()[i].text=v;}
 function setOptCorrect(i,single,checked){normalizeOpts();const opts=getOptState();if(single)opts.forEach((o,j)=>o.correct=(j===i));else opts[i].correct=checked;}
-function addOptRow(){const opts=getOptState();if(opts.length>=8){toast('最多 8 个选项');return;}normalizeOpts();opts.push({text:'',correct:false,img:''});renderOptRows(document.getElementById('q-type').value);}
+function addOptRow(){normalizeOpts();const opts=getOptState();if(opts.length>=8){toast('最多 8 个选项');return;}opts.push({text:'',correct:false,img:''});renderOptRows(document.getElementById('q-type').value);}
 function delOptRow(i){normalizeOpts();const opts=getOptState();opts.splice(i,1);renderOptRows(document.getElementById('q-type').value);}
 
 async function saveQuestion(){
