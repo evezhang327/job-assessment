@@ -131,6 +131,16 @@
         </div>
       </div>
       <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <h2 style="margin:0">📊 Excel 模板导入题目</h2>
+          <button class="ghost sm" onclick="downloadQTemplate()">⬇ 下载导入模板</button>
+        </div>
+        <p class="muted" style="margin:8px 0 12px">下载模板 → 按「一行一题」填好 → 上传，系统自动识别题型与答案。题型填：单选 / 多选 / 判断 / 排序 / 填空；判断题、填空题的选项列留空。</p>
+        <button onclick="document.getElementById('q-xlsx').click()">📊 上传 Excel 题目 (.xlsx)</button>
+        <input id="q-xlsx" type="file" accept=".xlsx,.xls" class="hidden" onchange="importQuestionsExcel(event)">
+        <div id="q-xlsx-preview"></div>
+      </div>
+      <div class="card">
         <h2 id="editor-title">添加题目</h2>
         <div class="row">
           <div class="field"><label>所属分组 *</label><select id="q-group"></select></div>
@@ -566,6 +576,132 @@ async function confirmImport(){
   document.getElementById('imp-text').value='';document.getElementById('imp-ans').value='';
   renderQList();
   toast('已导入 '+rows.length+' 题'+(skipped?'，跳过 '+skipped+' 题':''));
+}
+
+/* ============ Excel 模板导入题目 ============ */
+const Q_TPL_HEADER=['分组','题型','题干','选项A','选项B','选项C','选项D','选项E','选项F','正确答案'];
+function downloadQTemplate(){
+  if(typeof XLSX==='undefined'){toast('Excel 库未加载');return;}
+  const g=DB.s.groups, g0=g[0]||'分拣';
+  const ex=[
+    [g0,'单选','跨班次发货及时率指的是？','当前班次到货在本班发出的比例','上一班积压在本班发出的比例','当前班次发车总量','所有未发货总量','','','B'],
+    [g0,'多选','哪些情况可能导致轨迹断更？','漏扫','PDA断网','包裹压坏','操作节点遗漏','','','ABD'],
+    [g0,'判断','只要多叫人就能无限提升产能。','','','','','','','错'],
+    [g0,'排序','请按开班前优先完成的顺序排序。','检查物料是否充足','召开班前会','查看当班到货量和流向','检查人员出勤','','','CADB'],
+    [g0,'填空','破损异常件的第一步处理动作是？','','','','','','','隔离/隔离异常件'],
+  ];
+  const note=[[],['填写说明：'],
+    ['1. 题型只填：单选 / 多选 / 判断 / 排序 / 填空'],
+    ['2. 分组要与后台“设置”里的分组名一致，例如：'+g.join(' / ')],
+    ['3. 单选答案填一个字母(如 B)；多选填多个字母(如 ABD)；排序按正确先后填字母(如 CADB)。'],
+    ['4. 判断题答案填 对/错（是/否 也可）；判断题、填空题的选项列留空。'],
+    ['5. 填空题多个可接受答案用 / 隔开；每组满分100分按题目数自动均分。']];
+  const aoa=[Q_TPL_HEADER].concat(ex).concat(note);
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:10},{wch:8},{wch:42},{wch:18},{wch:18},{wch:18},{wch:18},{wch:12},{wch:12},{wch:14}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'题目');
+  XLSX.writeFile(wb,'题目导入模板.xlsx');
+}
+function normQType(s){s=String(s||'').trim();
+  if(/单选|single/i.test(s))return 'single';
+  if(/多选|multiple|multi/i.test(s))return 'multiple';
+  if(/判断|judge|是非|对错/i.test(s))return 'judge';
+  if(/排序|order|排列|顺序/i.test(s))return 'order';
+  if(/填空|fill|简答|自填|问答/i.test(s))return 'fill';
+  return '';}
+function normJudge(s){s=String(s||'').trim();
+  if(/^(对|是|正确|true|t|y|yes|√|✓|1)$/i.test(s))return '对';
+  if(/^(错|否|错误|false|f|n|no|×|✗|x|0)$/i.test(s))return '错';
+  return '';}
+function importQuestionsExcel(e){
+  const file=e.target.files[0];if(!file)return;
+  if(typeof XLSX==='undefined'){toast('Excel 解析库未加载');return;}
+  const reader=new FileReader();
+  reader.onload=(ev)=>{
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'array'});
+      let all=[];
+      wb.SheetNames.forEach(sn=>{const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:''});all=all.concat(parseQSheet(rows));});
+      if(all.length===0){toast('未识别到题目，请用“下载导入模板”的格式');return;}
+      window._impXlsxQs=all;renderQXlsxPreview(all);
+    }catch(err){toast('Excel 解析失败：'+err.message);}
+  };
+  reader.readAsArrayBuffer(file);e.target.value='';
+}
+function parseQSheet(rows){
+  let hdr=-1;
+  for(let i=0;i<rows.length;i++){const r=(rows[i]||[]).map(x=>String(x||'').trim());if(r.indexOf('题干')>=0&&r.indexOf('题型')>=0){hdr=i;break;}}
+  if(hdr<0)return [];
+  const head=rows[hdr].map(x=>String(x||'').trim());const col={opt:[]};
+  head.forEach((h,i)=>{
+    if(h==='分组'||h==='组'||h==='岗位')col.group=i;
+    else if(h==='题型'||h==='类型')col.type=i;
+    else if(h==='题干'||h==='题目'||h==='问题')col.title=i;
+    else if(h.indexOf('答案')>=0)col.ans=i;
+    else if(/^选项\s*[A-Ha-h]?$/.test(h)||/^[A-Ha-h]$/.test(h))col.opt.push(i);
+  });
+  const out=[];
+  for(let i=hdr+1;i<rows.length;i++){
+    const r=rows[i];if(!Array.isArray(r))continue;
+    const title=String(r[col.title]||'').trim();const typeRaw=String(r[col.type]||'').trim();
+    if(!title&&!typeRaw)continue;
+    out.push(parseQRow(r,col));
+  }
+  return out;
+}
+function parseQRow(r,col){
+  const group=String(col.group!==undefined?(r[col.group]||''):'').trim();
+  const title=String(r[col.title]||'').trim();
+  const type=normQType(r[col.type]);
+  const ansRaw=String(col.ans!==undefined?(r[col.ans]||''):'').trim();
+  const optTexts=col.opt.map(ci=>String(r[ci]||'').trim());
+  while(optTexts.length&&optTexts[optTexts.length-1]==='')optTexts.pop();
+  const q={group,title,type,options:optTexts,err:''};
+  if(!title){q.err='缺题干';return q;}
+  if(!type){q.err='题型无法识别';return q;}
+  if(!DB.s.groups.includes(group)){q.err='分组“'+group+'”不在设置中';return q;}
+  const letters=(ansRaw.match(/[A-Ha-h]/g)||[]).join('').toUpperCase();
+  if(type==='single'){
+    if(optTexts.length<2){q.err='选项不足2个';return q;}
+    const idx=letterToIdx(letters[0]||'');
+    if(idx<0||idx>=optTexts.length){q.err='答案字母无效';return q;}
+    q.built={group,type,title,options:optTexts.map((t,j)=>({text:t,correct:j===idx}))};
+  }else if(type==='multiple'){
+    if(optTexts.length<2){q.err='选项不足2个';return q;}
+    const idxs=letters.split('').map(letterToIdx).filter(k=>k>=0&&k<optTexts.length);
+    if(idxs.length===0){q.err='答案无效';return q;}
+    q.built={group,type,title,options:optTexts.map((t,j)=>({text:t,correct:idxs.indexOf(j)>=0}))};
+  }else if(type==='order'){
+    if(optTexts.length<2){q.err='选项不足2个';return q;}
+    const idx=letters.split('').map(letterToIdx);
+    if(idx.length!==optTexts.length||idx.some(k=>k<0||k>=optTexts.length)||new Set(idx).size!==idx.length){q.err='排序答案需每个选项字母各一次';return q;}
+    q.built={group,type,title,options:optTexts.map(t=>({text:t})),order:idx};
+  }else if(type==='judge'){
+    const jv=normJudge(ansRaw);if(!jv){q.err='判断答案填 对/错';return q;}
+    q.built={group,type,title,answer:jv};
+  }else if(type==='fill'){
+    const arr=ansRaw.split(/[\/／|]/).map(x=>x.trim()).filter(Boolean);
+    if(arr.length===0){q.err='缺答案';return q;}
+    q.built={group,type,title,answer:arr};
+  }
+  return q;
+}
+function renderQXlsxPreview(qs){
+  const ok=qs.filter(q=>q.built&&!q.err), bad=qs.length-ok.length;
+  let html='<div class="card" style="background:#f8fafd;border-style:dashed;margin-top:14px"><strong>预览：共 '+qs.length+' 行，可导入 '+ok.length+' 题'+(bad?'，<span style="color:var(--bad)">'+bad+' 行有问题将跳过</span>':'')+'</strong><div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>分组</th><th>题型</th><th>题干</th><th>状态</th></tr></thead><tbody>';
+  qs.forEach(q=>{const good=q.built&&!q.err;html+='<tr><td>'+esc(q.group||'-')+'</td><td>'+(TYPE_LABEL[q.type]||esc(String(q.type||'?')))+'</td><td>'+esc((q.title||'').slice(0,30))+'</td><td>'+(good?'<span class="pill pass">可导入</span>':'<span class="pill fail">'+esc(q.err||'无法解析')+'</span>')+'</td></tr>';});
+  html+='</tbody></table></div><button onclick="confirmQuestionsExcel()" style="margin-top:12px"'+(ok.length?'':' disabled')+'>✓ 确认导入 '+ok.length+' 题</button> <button class="ghost" onclick="document.getElementById(\'q-xlsx-preview\').innerHTML=\'\'">取消</button></div>';
+  document.getElementById('q-xlsx-preview').innerHTML=html;
+}
+async function confirmQuestionsExcel(){
+  const qs=(window._impXlsxQs||[]).filter(q=>q.built&&!q.err);
+  if(qs.length===0){toast('没有可导入的题目');return;}
+  const base={};
+  const rows=qs.map(q=>{const g=q.built.group;if(base[g]===undefined)base[g]=groupQCount(g);const sort=base[g]++;return qToRow(Object.assign({},q.built,{sort}));});
+  for(let i=0;i<rows.length;i+=200){const {error}=await SB.from('questions').insert(rows.slice(i,i+200));if(error){toast('导入失败：'+error.message);return;}}
+  await reloadQuestions();
+  document.getElementById('q-xlsx-preview').innerHTML='';
+  renderQList();toast('已导入 '+rows.length+' 题');
 }
 
 /* ============ 人员名单 ============ */
