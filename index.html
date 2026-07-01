@@ -94,7 +94,7 @@ const SUPABASE_URL='https://eyivdjgaziepvhuxtrma.supabase.co';
 const SUPABASE_KEY='sb_publishable_S-jg61KZdUmbyTStoPv6DQ_2l_0Oxfb';
 const SB=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
-const TYPE_LABEL={single:'单选题',multiple:'多选题',judge:'判断题',fill:'填空题',order:'排序题'};
+const TYPE_LABEL={single:'单选题',multiple:'多选题',judge:'判断题',fill:'填空题',order:'排序题',match:'连线题'};
 const LETTERS='ABCDEFGH';
 
 /* ============ utils ============ */
@@ -153,9 +153,16 @@ async function startQuiz(){
     const {data:qs,error:qe}=await SB.from('public_questions').select('*').eq('grp',group).order('sort');
     if(qe){toast('题目加载失败：'+qe.message);return;}
     if(!qs||qs.length===0){toast('「'+group+'」组暂无题目，请联系管理员');return;}
-    quizList=qs.map(r=>({id:r.id,group:r.grp,type:r.type,title:r.title,options:r.options||[]}));
+    quizList=qs.map(r=>({id:r.id,group:r.grp,type:r.type,title:r.title,options:r.options||[],images:r.images||[]}));
     if(SETTINGS.shuffle) shuffleArr(quizList);
-    quizList.forEach(q=>{ q.disp=(q.options||[]).map((_,i)=>i); if(SETTINGS.shuffle) shuffleArr(q.disp); });
+    quizList.forEach(q=>{
+      if(q.type==='match'){
+        q.mLefts=(q.options&&q.options.lefts)||[]; q.mRights=(q.options&&q.options.rights)||[];
+        q.dispLeft=q.mLefts.map((_,i)=>i); if(SETTINGS.shuffle) shuffleArr(q.dispLeft);
+      }else{
+        q.disp=(Array.isArray(q.options)?q.options:[]).map((_,i)=>i); if(SETTINGS.shuffle) shuffleArr(q.disp);
+      }
+    });
     currentTaker={name,empid,group};
     document.getElementById('quiz-who').textContent='答题人：'+name+'（'+group+'）';
     renderQuiz();
@@ -164,26 +171,37 @@ async function startQuiz(){
 }
 function renderQuiz(){
   const pts=Math.round(100/quizList.length*10)/10;
+  const oImg=o=>o.img?'<img src="'+escAttr(o.img)+'" style="max-width:100%;max-height:160px;border-radius:6px;display:block;margin-top:6px">':'';
   document.getElementById('quiz-questions').innerHTML=quizList.map((q,i)=>{
     let body='';
     if(q.type==='single'||q.type==='multiple'){
-      body=q.disp.map((oi,pos)=>'<label class="choice" onclick="toggleChoice(this)"><input type="'+(q.type==='single'?'radio':'checkbox')+'" name="q-'+q.id+'" value="'+oi+'"><span>'+LETTERS[pos]+'. '+esc(q.options[oi].text)+'</span></label>').join('');
+      body=q.disp.map((oi,pos)=>'<label class="choice" onclick="toggleChoice(this)" style="align-items:flex-start"><input type="'+(q.type==='single'?'radio':'checkbox')+'" name="q-'+q.id+'" value="'+oi+'" style="margin-top:3px"><span>'+LETTERS[pos]+'. '+esc(q.options[oi].text)+oImg(q.options[oi])+'</span></label>').join('');
     }else if(q.type==='order'){
       const n=q.options.length;
       body='<div class="qmark" style="margin-bottom:8px">请为每个选项选择正确的先后位置</div>'+q.disp.map((oi,pos)=>{
         let sel='<select class="ord-sel" name="q-'+q.id+'-'+oi+'" onchange="refreshProgress()"><option value="">第几位</option>';
         for(let p=1;p<=n;p++) sel+='<option value="'+p+'">第 '+p+' 位</option>';
-        return '<div class="choice" style="cursor:default"><span>'+LETTERS[pos]+'. '+esc(q.options[oi].text)+'</span>'+sel+'</select></div>';
+        return '<div class="choice" style="cursor:default"><span>'+LETTERS[pos]+'. '+esc(q.options[oi].text)+oImg(q.options[oi])+'</span>'+sel+'</select></div>';
       }).join('');
+    }else if(q.type==='match'){
+      const rights=q.mRights;
+      const gallery='<div class="qmark" style="margin:10px 0 6px">可选匹配项：</div><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px">'+rights.map((r,ri)=>'<div style="border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:14px"><b>'+(ri+1)+'.</b> '+esc(r.text||'')+(r.img?'<img src="'+escAttr(r.img)+'" style="max-height:80px;border-radius:4px;display:block;margin-top:4px">':'')+'</div>').join('')+'</div>';
+      body='<div class="qmark" style="margin-bottom:8px">请为左侧每一项选择正确的匹配项（下方序号）</div>'+q.dispLeft.map(li=>{
+        const l=q.mLefts[li];
+        let sel='<select class="ord-sel" name="q-'+q.id+'-'+li+'" onchange="refreshProgress()"><option value="">选择</option>';
+        rights.forEach((r,ri)=>{ sel+='<option value="'+ri+'">'+(ri+1)+'. '+esc((r.text||'').slice(0,14)||('图'+(ri+1)))+'</option>'; });
+        return '<div class="choice" style="cursor:default"><span style="flex:1">'+esc(l.text||'')+(l.img?'<img src="'+escAttr(l.img)+'" style="max-height:80px;border-radius:4px;display:block;margin-top:4px">':'')+'</span>'+sel+'</select></div>';
+      }).join('')+gallery;
     }else if(q.type==='judge'){
       body=['对','错'].map(v=>'<label class="choice" onclick="toggleChoice(this)"><input type="radio" name="q-'+q.id+'" value="'+v+'"><span>'+v+'</span></label>').join('');
     }else if(q.type==='fill'){
       body='<input type="text" name="q-'+q.id+'" placeholder="请输入答案" oninput="refreshProgress()">';
     }
+    const stemImgs=(q.images||[]).map(u=>'<img src="'+escAttr(u)+'" style="max-width:100%;border-radius:8px;margin:4px 0;border:1px solid var(--line)">').join('');
     const clearable=(q.type==='single'||q.type==='judge');
     return '<div class="card" id="qc-'+q.id+'"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px">'+
       '<div><span class="tag">'+TYPE_LABEL[q.type]+'</span><span class="tag score">'+pts+'分</span><br><strong>'+(i+1)+'. '+esc(q.title)+'</strong></div>'+
-      '<span class="qstatus todo" id="st-'+q.id+'">⬜ 未作答</span></div>'+body+
+      '<span class="qstatus todo" id="st-'+q.id+'">⬜ 未作答</span></div>'+stemImgs+body+
       (clearable?'<button class="link" style="margin-top:6px" onclick="clearAnswer(\''+q.id+'\')">清除 / 标记不确定</button>':'')+'</div>';
   }).join('');
   refreshProgress();
@@ -212,6 +230,7 @@ function toggleChoice(label){
 }
 function clearAnswer(id){document.getElementsByName('q-'+id).forEach(r=>{r.checked=false;const c=r.closest('.choice');if(c)c.classList.remove('sel');});refreshProgress();}
 function isAnswered(q){
+  if(q.type==='match'){for(let i=0;i<q.mLefts.length;i++){const el=document.getElementsByName('q-'+q.id+'-'+i)[0];if(!el||el.value==='')return false;}return true;}
   if(q.type==='order'){for(let j=0;j<q.options.length;j++){const el=document.getElementsByName('q-'+q.id+'-'+j)[0];if(!el||!el.value)return false;}return true;}
   if(q.type==='fill'){const el=document.getElementsByName('q-'+q.id)[0];return !!(el&&el.value.trim());}
   let a=false;document.getElementsByName('q-'+q.id).forEach(r=>{if(r.checked)a=true});return a;
@@ -230,6 +249,7 @@ function collectAnswer(q){
   if(q.type==='judge'){let v=null;document.getElementsByName('q-'+q.id).forEach(r=>{if(r.checked)v=r.value});return v;}
   if(q.type==='multiple'){const a=[];document.getElementsByName('q-'+q.id).forEach(r=>{if(r.checked)a.push(parseInt(r.value))});return a.length?a:null;}
   if(q.type==='order'){const n=q.options.length;const seq=new Array(n).fill(null);for(let j=0;j<n;j++){const el=document.getElementsByName('q-'+q.id+'-'+j)[0];const p=el?parseInt(el.value):NaN;if(p>=1&&p<=n)seq[p-1]=j;}return seq;}
+  if(q.type==='match'){const n=q.mLefts.length;const seq=new Array(n).fill(-1);for(let i=0;i<n;i++){const el=document.getElementsByName('q-'+q.id+'-'+i)[0];seq[i]=(el&&el.value!=='')?parseInt(el.value):-1;}return seq;}
   if(q.type==='fill'){const el=document.getElementsByName('q-'+q.id)[0];return el?el.value.trim():'';}
   return null;
 }

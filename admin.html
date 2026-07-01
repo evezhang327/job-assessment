@@ -152,10 +152,17 @@
               <option value="judge">判断题</option>
               <option value="fill">填空题</option>
               <option value="order">排序题</option>
+              <option value="match">连线题</option>
             </select>
           </div>
         </div>
         <div class="field"><label>题干 *</label><textarea id="q-title" rows="2" placeholder="请输入题目内容"></textarea></div>
+        <div class="field">
+          <label>题干配图（可选，可多张）</label>
+          <div id="q-images" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"></div>
+          <button type="button" class="ghost sm" id="q-img-btn" onclick="document.getElementById('q-img-input').click()">＋ 添加题干图片</button>
+          <input id="q-img-input" type="file" accept="image/*" multiple class="hidden" onchange="onPickQImages(event)">
+        </div>
         <div id="editor-options"></div>
         <p class="qmark" style="margin-bottom:12px">💡 每组满分 100 分，按该组题目数量自动平均分配，增删题目会自动调整，无需手动设分值。</p>
         <div class="row">
@@ -291,9 +298,10 @@ const SUPABASE_URL='https://eyivdjgaziepvhuxtrma.supabase.co';
 const SUPABASE_KEY='sb_publishable_S-jg61KZdUmbyTStoPv6DQ_2l_0Oxfb';
 const SB=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
-const TYPE_LABEL={single:'单选题',multiple:'多选题',judge:'判断题',fill:'填空题',order:'排序题'};
+const TYPE_LABEL={single:'单选题',multiple:'多选题',judge:'判断题',fill:'填空题',order:'排序题',match:'连线题'};
 const LETTERS='ABCDEFGH';
 function letterToIdx(ch){return LETTERS.indexOf(ch.toUpperCase());}
+const IMG_BUCKET='quiz-images';
 
 /* ============ 内存缓存（云端数据加载到这里供渲染） ============ */
 let state={questions:[],roster:[],results:[],settings:{title:'岗位测评',descr:'',pass:60,showscore:1,groups:['调度','分拣','操作','异常处理']}};
@@ -309,23 +317,41 @@ function fmtPts(p){return Math.round(p*10)/10;}
 
 /* ---- 行 <-> 题目对象 转换 ---- */
 function rowToQ(r){
-  const q={id:r.id,group:r.grp,type:r.type,title:r.title,sort:r.sort||0};
-  const opts=(r.options||[]).map(o=>({text:o.text,correct:false}));
+  const q={id:r.id,group:r.grp,type:r.type,title:r.title,sort:r.sort||0,images:Array.isArray(r.images)?r.images:[]};
+  const opts=(Array.isArray(r.options)?r.options:[]).map(o=>({text:o.text,img:o.img||'',correct:false}));
   const key=r.answer_key;
   if(r.type==='single'){ if(typeof key==='number'&&opts[key]) opts[key].correct=true; q.options=opts; }
   else if(r.type==='multiple'){ (Array.isArray(key)?key:[]).forEach(i=>{if(opts[i])opts[i].correct=true;}); q.options=opts; }
   else if(r.type==='order'){ q.options=opts; q.order=Array.isArray(key)?key:[]; }
   else if(r.type==='judge'){ q.options=[]; q.answer=key; }
   else if(r.type==='fill'){ q.options=[]; q.answer=Array.isArray(key)?key:[]; }
+  else if(r.type==='match'){
+    const o=r.options||{}; const lefts=(o.lefts||[]).map(x=>({text:x.text,img:x.img||''})); const rights=(o.rights||[]).map(x=>({text:x.text,img:x.img||''}));
+    const km=Array.isArray(key)?key:[];
+    // 还原为“成对”供编辑：left i 对应 rights[km[i]]
+    q.pairs=lefts.map((l,i)=>({left:l, right:rights[km[i]]||{text:'',img:''}}));
+    q.options=[];
+  }
   return q;
 }
 function qToRow(q){
-  const row={grp:q.group,type:q.type,title:q.title,sort:q.sort||0,options:[],answer_key:null};
-  if(q.type==='single'){ row.options=q.options.map(o=>({text:o.text})); row.answer_key=q.options.findIndex(o=>o.correct); }
-  else if(q.type==='multiple'){ row.options=q.options.map(o=>({text:o.text})); row.answer_key=q.options.map((o,i)=>o.correct?i:-1).filter(i=>i>=0); }
-  else if(q.type==='order'){ row.options=q.options.map(o=>({text:o.text})); row.answer_key=q.order; }
+  const row={grp:q.group,type:q.type,title:q.title,sort:q.sort||0,options:[],answer_key:null,images:q.images||[]};
+  const mapOpt=o=>{const x={text:o.text};if(o.img)x.img=o.img;return x;};
+  if(q.type==='single'){ row.options=q.options.map(mapOpt); row.answer_key=q.options.findIndex(o=>o.correct); }
+  else if(q.type==='multiple'){ row.options=q.options.map(mapOpt); row.answer_key=q.options.map((o,i)=>o.correct?i:-1).filter(i=>i>=0); }
+  else if(q.type==='order'){ row.options=q.options.map(mapOpt); row.answer_key=q.order; }
   else if(q.type==='judge'){ row.options=[]; row.answer_key=q.answer; }
   else if(q.type==='fill'){ row.options=[]; row.answer_key=q.answer; }
+  else if(q.type==='match'){
+    // 存储时把右项顺序打乱，正确映射放进受保护的 answer_key，避免答题端看出配对
+    const pairs=q.pairs||[]; const n=pairs.length;
+    const perm=pairs.map((_,i)=>i);
+    for(let i=n-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[perm[i],perm[j]]=[perm[j],perm[i]];}
+    const rights=perm.map(oi=>mapOpt(pairs[oi].right));
+    const posOf={}; perm.forEach((oi,pos)=>posOf[oi]=pos);   // 原右项 oi 在打乱后的位置
+    row.options={lefts:pairs.map(p=>mapOpt(p.left)), rights:rights};
+    row.answer_key=pairs.map((_,i)=>posOf[i]);               // left i 的正确右项在 rights 中的下标
+  }
   return row;
 }
 
@@ -392,10 +418,87 @@ function renderAdmin(){
 
 /* ============ 题目编辑器 ============ */
 let editingId=null;
+let qImages=[];               // 当前编辑题目的题干配图 URL 列表
+
+/* ---- 图片：压缩 + 上传到 Storage ---- */
+function compressImage(file){
+  return new Promise((resolve,reject)=>{
+    const fr=new FileReader();
+    fr.onload=()=>{const img=new Image();
+      img.onload=()=>{const max=1280;let w=img.width,h=img.height;
+        if(w>max||h>max){const s=Math.min(max/w,max/h);w=Math.round(w*s);h=Math.round(h*s);}
+        const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+        cv.getContext('2d').drawImage(img,0,0,w,h);
+        cv.toBlob(b=>b?resolve(b):reject(new Error('压缩失败')),'image/jpeg',0.82);};
+      img.onerror=()=>reject(new Error('图片读取失败'));img.src=fr.result;};
+    fr.onerror=()=>reject(new Error('文件读取失败'));fr.readAsDataURL(file);
+  });
+}
+async function uploadImageFile(file){
+  if(!/^image\//.test(file.type)) throw new Error('请选择图片文件');
+  const blob=await compressImage(file);
+  const path='q/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
+  const {error}=await SB.storage.from(IMG_BUCKET).upload(path,blob,{contentType:'image/jpeg'});
+  if(error) throw error;
+  return SB.storage.from(IMG_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+/* ---- 题干配图 ---- */
+function renderQImages(){
+  const box=document.getElementById('q-images'); if(!box) return;
+  box.innerHTML=qImages.map((u,i)=>'<div style="position:relative;display:inline-block"><img src="'+escAttr(u)+'" style="height:64px;border-radius:8px;border:1px solid var(--line)"><button type="button" onclick="delQImage('+i+')" title="删除" style="position:absolute;top:-7px;right:-7px;background:var(--bad);color:#fff;border-radius:50%;width:20px;height:20px;padding:0;font-size:13px;line-height:18px">×</button></div>').join('');
+}
+async function onPickQImages(e){
+  const files=[].slice.call(e.target.files); e.target.value=''; if(!files.length) return;
+  const btn=document.getElementById('q-img-btn'); btn.disabled=true; const t0=btn.textContent; btn.textContent='上传中…';
+  try{ for(const f of files){ const u=await uploadImageFile(f); qImages.push(u); renderQImages(); } toast('图片已上传'); }
+  catch(err){ toast('图片上传失败：'+(err.message||err)); }
+  finally{ btn.disabled=false; btn.textContent=t0; }
+}
+function delQImage(i){ qImages.splice(i,1); renderQImages(); }
+/* ---- 选项配图 ---- */
+function pickOptImg(i){
+  const inp=document.createElement('input');inp.type='file';inp.accept='image/*';
+  inp.onchange=async()=>{const f=inp.files[0];if(!f)return;toast('上传中…');try{const u=await uploadImageFile(f);normalizeOpts();getOptState()[i].img=u;renderOptRows(document.getElementById('q-type').value);}catch(err){toast('上传失败：'+(err.message||err));}};
+  inp.click();
+}
+function clearOptImg(i){ normalizeOpts(); getOptState()[i].img=''; renderOptRows(document.getElementById('q-type').value); }
+/* ---- 连线题配对 ---- */
+function mPairs(){ return document.getElementById('editor-options')._pairs; }
+function renderPairRows(){
+  const pairs=mPairs(); const rows=document.getElementById('pair-rows'); if(!rows) return; rows.innerHTML='';
+  pairs.forEach((p,i)=>{
+    const div=document.createElement('div'); div.className='opt-row'; div.style.alignItems='center';
+    div.innerHTML='<span style="width:16px;color:var(--muted)">'+(i+1)+'</span>'+
+      '<input type="text" value="'+escAttr(p.left.text||'')+'" oninput="setPair('+i+',\'left\',this.value)" placeholder="左项">'+pairImgBtn(i,'left',p.left.img)+
+      '<span style="color:var(--muted);font-weight:700">↔</span>'+
+      '<input type="text" value="'+escAttr(p.right.text||'')+'" oninput="setPair('+i+',\'right\',this.value)" placeholder="右项">'+pairImgBtn(i,'right',p.right.img)+
+      (pairs.length>2?'<button type="button" class="danger sm" onclick="delPairRow('+i+')">×</button>':'');
+    rows.appendChild(div);
+  });
+}
+function pairImgBtn(i,side,img){ return '<button type="button" class="ghost sm" onclick="pickPairImg('+i+',\''+side+'\')">'+(img?'换图':'图')+'</button>'+(img?'<img src="'+escAttr(img)+'" onclick="clearPairImg('+i+',\''+side+'\')" title="点击删除" style="height:30px;border-radius:5px;cursor:pointer">':''); }
+function setPair(i,side,v){ mPairs()[i][side].text=v; }
+function addPairRow(){ if(mPairs().length>=8){toast('最多 8 对');return;} mPairs().push({left:{text:'',img:''},right:{text:'',img:''}}); renderPairRows(); }
+function delPairRow(i){ mPairs().splice(i,1); renderPairRows(); }
+function pickPairImg(i,side){
+  const inp=document.createElement('input');inp.type='file';inp.accept='image/*';
+  inp.onchange=async()=>{const f=inp.files[0];if(!f)return;toast('上传中…');try{const u=await uploadImageFile(f);mPairs()[i][side].img=u;renderPairRows();}catch(err){toast('上传失败：'+(err.message||err));}};
+  inp.click();
+}
+function clearPairImg(i,side){ mPairs()[i][side].img=''; renderPairRows(); }
+
 function renderEditorOptions(){
   const type=document.getElementById('q-type').value;
   const box=document.getElementById('editor-options');
+  renderQImages();
   const optionBased=(type==='single'||type==='multiple'||type==='order');
+  if(type==='match'){
+    box.dataset.type=type; box._opts=null;
+    if(!Array.isArray(box._pairs)||!box._pairs.length) box._pairs=[{left:{text:'',img:''},right:{text:'',img:''}},{left:{text:'',img:''},right:{text:'',img:''}}];
+    box.innerHTML='<label>连线配对（左项 ↔ 右项，一行一对）</label><div id="pair-rows"></div><button type="button" class="ghost sm" onclick="addPairRow()">＋ 增加一对</button><div class="qmark">答题端会把右项顺序打乱，答题人需把每个左项连到正确的右项；全部连对才得分。左/右项可只填文字、只放图，或图文都有。</div>';
+    renderPairRows();
+    return;
+  }
   if(optionBased){
     if(!Array.isArray(box._opts)) box._opts=[{text:'',correct:false},{text:'',correct:false},{text:'',correct:false},{text:'',correct:false}];
     normalizeOpts();
@@ -422,14 +525,15 @@ function renderOptRows(type){
   opts.forEach((o,i)=>{
     const wrap=document.createElement('div');wrap.className='opt-row';
     const picker=type==='order'?'':'<label class="pick"><input type="'+(type==='single'?'radio':'checkbox')+'" name="correct" '+(o.correct?'checked':'')+' onchange="setOptCorrect('+i+','+(type==='single')+',this.checked)"> 正确</label>';
-    wrap.innerHTML='<span style="width:18px;color:var(--muted);font-weight:600">'+LETTERS[i]+'</span><input type="text" value="'+escAttr(o.text!==undefined?o.text:o)+'" oninput="setOptText('+i+',this.value)" placeholder="选项内容">'+picker+(opts.length>2?'<button type="button" class="danger sm" onclick="delOptRow('+i+')">×</button>':'');
+    const imgCtrl='<button type="button" class="ghost sm" onclick="pickOptImg('+i+')">'+(o.img?'换图':'图')+'</button>'+(o.img?'<img src="'+escAttr(o.img)+'" onclick="clearOptImg('+i+')" title="点击删除" style="height:30px;border-radius:5px;cursor:pointer">':'');
+    wrap.innerHTML='<span style="width:18px;color:var(--muted);font-weight:600">'+LETTERS[i]+'</span><input type="text" value="'+escAttr(o.text!==undefined?o.text:o)+'" oninput="setOptText('+i+',this.value)" placeholder="选项内容（可只放图）">'+imgCtrl+picker+(opts.length>2?'<button type="button" class="danger sm" onclick="delOptRow('+i+')">×</button>':'');
     rows.appendChild(wrap);
   });
 }
 function normalizeOpts(){const box=document.getElementById('editor-options');box._opts=box._opts.map(o=>typeof o==='string'?{text:o,correct:false}:o);}
 function setOptText(i,v){normalizeOpts();getOptState()[i].text=v;}
 function setOptCorrect(i,single,checked){normalizeOpts();const opts=getOptState();if(single)opts.forEach((o,j)=>o.correct=(j===i));else opts[i].correct=checked;}
-function addOptRow(){const opts=getOptState();if(opts.length>=8){toast('最多 8 个选项');return;}normalizeOpts();opts.push({text:'',correct:false});renderOptRows(document.getElementById('q-type').value);}
+function addOptRow(){const opts=getOptState();if(opts.length>=8){toast('最多 8 个选项');return;}normalizeOpts();opts.push({text:'',correct:false,img:''});renderOptRows(document.getElementById('q-type').value);}
 function delOptRow(i){normalizeOpts();const opts=getOptState();opts.splice(i,1);renderOptRows(document.getElementById('q-type').value);}
 
 async function saveQuestion(){
@@ -438,23 +542,27 @@ async function saveQuestion(){
   const group=document.getElementById('q-group').value;
   if(!title){toast('请填写题干');return;}
   if(!group){toast('请选择所属分组');return;}
-  const q={type,title,group};
+  const q={type,title,group,images:qImages.slice()};
   if(type==='single'||type==='multiple'){
     normalizeOpts();
-    const opts=getOptState().map(o=>({text:(o.text||'').trim(),correct:!!o.correct})).filter(o=>o.text!=='');
-    if(opts.length<2){toast('至少需要 2 个有效选项');return;}
+    const opts=getOptState().map(o=>({text:(o.text||'').trim(),correct:!!o.correct,img:o.img||''})).filter(o=>o.text!==''||o.img);
+    if(opts.length<2){toast('至少需要 2 个有效选项（文字或图片）');return;}
     const cc=opts.filter(o=>o.correct).length;
     if(cc===0){toast('请勾选正确答案');return;}
     if(type==='single'&&cc>1){toast('单选题只能有一个正确答案');return;}
     q.options=opts;
   }else if(type==='order'){
     normalizeOpts();
-    const opts=getOptState().map(o=>({text:(o.text||'').trim()})).filter(o=>o.text!=='');
+    const opts=getOptState().map(o=>({text:(o.text||'').trim(),img:o.img||''})).filter(o=>o.text!==''||o.img);
     if(opts.length<2){toast('至少需要 2 个有效选项');return;}
     const seq=(document.getElementById('order-answer').value||'').toUpperCase().replace(/[^A-Z]/g,'').split('');
     const idx=seq.map(letterToIdx);
     if(idx.length!==opts.length||idx.some(i=>i<0||i>=opts.length)||new Set(idx).size!==idx.length){toast('正确顺序需用每个选项字母各一次，如 '+opts.map((o,i)=>LETTERS[i]).join(''));return;}
     q.options=opts;q.order=idx;
+  }else if(type==='match'){
+    const pairs=(mPairs()||[]).map(p=>({left:{text:(p.left.text||'').trim(),img:p.left.img||''},right:{text:(p.right.text||'').trim(),img:p.right.img||''}})).filter(p=>(p.left.text||p.left.img)&&(p.right.text||p.right.img));
+    if(pairs.length<2){toast('至少需要 2 对完整的连线（左右都要填或放图）');return;}
+    q.pairs=pairs;
   }else if(type==='judge'){ q.answer=document.getElementById('judge-answer').value; }
   else if(type==='fill'){ const a=document.getElementById('fill-answer').value.trim();if(!a){toast('请填写正确答案');return;}q.answer=a.split('/').map(x=>x.trim()).filter(Boolean); }
 
@@ -480,10 +588,12 @@ function editQuestion(id){
   document.getElementById('q-type').value=q.type;
   document.getElementById('q-group').value=q.group||DB.s.groups[0];
   document.getElementById('q-title').value=q.title;
+  qImages=(q.images||[]).slice();
   const box=document.getElementById('editor-options');
-  if(q.type==='single'||q.type==='multiple'){ box._opts=q.options.map(o=>({text:o.text,correct:o.correct}));box._orderAns=''; }
-  else if(q.type==='order'){ box._opts=q.options.map(o=>({text:o.text}));box._orderAns=(q.order||[]).map(i=>LETTERS[i]).join(''); }
-  else{ box._opts=null;box._orderAns=''; }
+  if(q.type==='single'||q.type==='multiple'){ box._opts=q.options.map(o=>({text:o.text,correct:o.correct,img:o.img||''}));box._orderAns='';box._pairs=null; }
+  else if(q.type==='order'){ box._opts=q.options.map(o=>({text:o.text,img:o.img||''}));box._orderAns=(q.order||[]).map(i=>LETTERS[i]).join('');box._pairs=null; }
+  else if(q.type==='match'){ box._opts=null;box._orderAns='';box._pairs=(q.pairs||[]).map(p=>({left:{text:p.left.text||'',img:p.left.img||''},right:{text:p.right.text||'',img:p.right.img||''}})); }
+  else{ box._opts=null;box._orderAns='';box._pairs=null; }
   renderEditorOptions();
   if(q.type==='judge'){ document.getElementById('judge-answer').value=q.answer; }
   else if(q.type==='fill'){ document.getElementById('fill-answer').value=(q.answer||[]).join('/'); }
@@ -495,7 +605,8 @@ function resetEditor(){
   document.getElementById('save-q-btn').textContent='保存题目';
   document.getElementById('cancel-edit-btn').classList.add('hidden');
   document.getElementById('q-title').value='';
-  const box=document.getElementById('editor-options');box._opts=null;box._orderAns='';box.dataset.type='';
+  qImages=[];
+  const box=document.getElementById('editor-options');box._opts=null;box._orderAns='';box._pairs=null;box.dataset.type='';
   renderEditorOptions();
 }
 async function delQuestion(id){
@@ -514,15 +625,19 @@ function renderQList(){
   document.getElementById('q-total').textContent=flt?(list.length?'100（每题约 '+fmtPts(perPoints(flt))+' 分）':'0'):'每组100';
   const box=document.getElementById('admin-q-list');
   if(list.length===0){box.innerHTML='<div class="empty">'+(flt?'该分组下还没有题目':'还没有题目，请在上方添加')+'</div>';return;}
+  const oimg=o=>o.img?' <img src="'+escAttr(o.img)+'" style="height:28px;vertical-align:middle;border-radius:4px;margin-left:4px">':'';
+  const stemThumbs=arr=>((arr&&arr.length)?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0">'+arr.map(u=>'<img src="'+escAttr(u)+'" style="height:56px;border-radius:6px;border:1px solid var(--line)">').join('')+'</div>':'');
   box.innerHTML=list.map((q,i)=>{
     let body='';
     if(q.type==='single'||q.type==='multiple'){
-      body=q.options.map((o,j)=>'<div class="opt-line '+(o.correct?'correct':'')+'">'+LETTERS[j]+'. '+esc(o.text)+(o.correct?' ✓':'')+'</div>').join('');
+      body=q.options.map((o,j)=>'<div class="opt-line '+(o.correct?'correct':'')+'">'+LETTERS[j]+'. '+esc(o.text)+oimg(o)+(o.correct?' ✓':'')+'</div>').join('');
     }else if(q.type==='order'){
-      body=q.options.map((o,j)=>'<div class="opt-line">'+LETTERS[j]+'. '+esc(o.text)+'</div>').join('')+'<div class="opt-line correct">正确顺序：'+(q.order||[]).map(idx=>LETTERS[idx]).join(' → ')+' ✓</div>';
+      body=q.options.map((o,j)=>'<div class="opt-line">'+LETTERS[j]+'. '+esc(o.text)+oimg(o)+'</div>').join('')+'<div class="opt-line correct">正确顺序：'+(q.order||[]).map(idx=>LETTERS[idx]).join(' → ')+' ✓</div>';
+    }else if(q.type==='match'){
+      body=(q.pairs||[]).map(p=>'<div class="opt-line correct">'+esc(p.left.text||'')+oimg(p.left)+' ↔ '+esc(p.right.text||'')+oimg(p.right)+'</div>').join('');
     }else if(q.type==='judge'){ body='<div class="opt-line correct">正确答案：'+esc(q.answer)+' ✓</div>'; }
     else if(q.type==='fill'){ body='<div class="opt-line correct">正确答案：'+esc((q.answer||[]).join(' / '))+' ✓</div>'; }
-    return '<div class="q-item"><div class="q-head"><div style="flex:1"><span class="tag" style="background:#e8f5e9;color:#2e7d32">'+esc(q.group||'未分组')+'</span><span class="tag">'+TYPE_LABEL[q.type]+'</span><span class="tag score">'+fmtPts(perPoints(q.group))+'分</span><br><strong>'+(i+1)+'. '+esc(q.title)+'</strong></div><div style="flex:none;display:flex;gap:6px"><button class="ghost sm" onclick="editQuestion(\''+q.id+'\')">编辑</button><button class="danger sm" onclick="delQuestion(\''+q.id+'\')">删除</button></div></div><div style="margin-top:8px">'+body+'</div></div>';
+    return '<div class="q-item"><div class="q-head"><div style="flex:1"><span class="tag" style="background:#e8f5e9;color:#2e7d32">'+esc(q.group||'未分组')+'</span><span class="tag">'+TYPE_LABEL[q.type]+'</span><span class="tag score">'+fmtPts(perPoints(q.group))+'分</span><br><strong>'+(i+1)+'. '+esc(q.title)+'</strong></div><div style="flex:none;display:flex;gap:6px"><button class="ghost sm" onclick="editQuestion(\''+q.id+'\')">编辑</button><button class="danger sm" onclick="delQuestion(\''+q.id+'\')">删除</button></div></div>'+stemThumbs(q.images)+'<div style="margin-top:8px">'+body+'</div></div>';
   }).join('');
 }
 
