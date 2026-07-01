@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>岗位测评 · 答题</title>
+<style>
+  :root{--bg:#f4f6fb;--card:#fff;--ink:#1f2733;--muted:#6b7686;--brand:#3b6ef5;--brand-d:#2c55c9;--line:#e6eaf2;--ok:#16a34a;--bad:#dc2626;--warn:#d97706;--shadow:0 6px 24px rgba(28,42,80,.08)}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:760px;margin:0 auto;padding:24px 18px 80px}
+  h2{font-size:18px;margin:0 0 14px}
+  .muted{color:var(--muted)}
+  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:12px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px}
+  .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#3b6ef5,#6b8dff);display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow);margin-bottom:16px}
+  button{font:inherit;cursor:pointer;border:none;border-radius:9px;padding:10px 16px;background:var(--brand);color:#fff;font-weight:600;transition:.15s}
+  button:hover{background:var(--brand-d)}
+  button.ghost{background:#eef2fb;color:var(--brand)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  input,select{font:inherit;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#fbfcfe;color:var(--ink)}
+  input:focus,select:focus{outline:none;border-color:var(--brand);background:#fff}
+  label{display:block;font-weight:600;font-size:14px;margin:0 0 6px}
+  .field{margin-bottom:14px}
+  .row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}
+  .hidden{display:none!important}
+  .tag{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:20px;background:#eef2fb;color:var(--brand);margin-right:6px}
+  .tag.score{background:#fff4e6;color:var(--warn)}
+  .choice{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;cursor:pointer;transition:.12s}
+  .choice:hover{border-color:var(--brand);background:#f7f9ff}
+  .choice input{width:auto;flex:none}
+  .choice.sel{border-color:var(--brand);background:#eef3ff}
+  .result-banner{text-align:center;padding:26px;border-radius:14px;margin-bottom:18px}
+  .result-banner .score{font-size:46px;font-weight:800}
+  .pill{font-size:12px;padding:2px 8px;border-radius:20px;font-weight:600}
+  .pill.pass{background:#ecfdf3;color:var(--ok)}.pill.fail{background:#fef2f2;color:var(--bad)}
+  .qmark{font-size:13px;color:var(--muted);margin-top:6px}
+  .ans-fb{margin-top:8px;font-size:14px;padding:8px 10px;border-radius:8px}
+  .ans-fb.ok{background:#ecfdf3;color:var(--ok)}.ans-fb.no{background:#fef2f2;color:var(--bad)}
+  .link{color:var(--brand);cursor:pointer;background:none;padding:0;font-weight:600;font-size:13px}
+  .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1f2733;color:#fff;padding:11px 20px;border-radius:10px;font-size:14px;z-index:99;box-shadow:var(--shadow);opacity:0;transition:.25s}
+  .toast.show{opacity:1}
+  .qstatus{font-size:13px;font-weight:600;white-space:nowrap}
+  .qstatus.done{color:var(--ok)}.qstatus.todo{color:var(--muted)}
+  .card.answered{border-color:#bbf7d0;box-shadow:0 0 0 1px #bbf7d0,var(--shadow)}
+  #quiz-progress{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .ptrack{flex:1;height:9px;background:#e6eaf2;border-radius:6px;overflow:hidden}
+  .pfill{height:100%;background:var(--ok);width:0;transition:.25s}
+  #progress-text{font-weight:700;font-size:14px;white-space:nowrap}
+  .ord-sel{width:auto!important;flex:none;margin-left:auto}
+  #loading{text-align:center;color:var(--muted);padding:60px 10px}
+</style>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+<div class="wrap">
+  <div id="loading">连接中…</div>
+
+  <section id="view-quiz-entry" class="hidden">
+    <div class="topbar"><div class="brand"><span class="logo">✍️</span><span id="quiz-entry-title">岗位测评</span></div></div>
+    <div class="card">
+      <h2>开始答题</h2>
+      <p class="muted" id="quiz-entry-desc"></p>
+      <div class="row">
+        <div class="field"><label>姓名 *</label><input id="taker-name" placeholder="请输入姓名"></div>
+        <div class="field"><label>工号</label><input id="taker-id" placeholder="请输入工号"></div>
+      </div>
+      <div class="field hidden" id="taker-group-wrap"><label>所属分组</label><select id="taker-group"></select></div>
+      <p class="muted" id="taker-hint" style="font-size:13px"></p>
+      <button id="start-btn" onclick="startQuiz()">开始答题 →</button>
+    </div>
+  </section>
+
+  <section id="view-quiz" class="hidden">
+    <div class="topbar"><div class="brand"><span class="logo">✍️</span><span id="quiz-title">岗位测评</span></div><span class="muted" id="quiz-who"></span></div>
+    <div id="quiz-progress"><span id="progress-text">已完成 0 / 0 题</span><div class="ptrack"><div class="pfill" id="progress-fill"></div></div><span id="quiz-timer" class="hidden" style="font-weight:700;font-size:14px;white-space:nowrap;color:var(--muted)"></span></div>
+    <div id="quiz-questions"></div>
+    <button id="submit-btn" onclick="submitQuiz()" style="width:100%;padding:14px">提交答卷</button>
+  </section>
+
+  <section id="view-result" class="hidden">
+    <div class="topbar"><div class="brand"><span class="logo">✓</span><span>测评结果</span></div></div>
+    <div id="result-banner"></div>
+    <div id="result-detail"></div>
+    <button class="ghost" style="width:100%" onclick="restart()">完成 / 下一位答题</button>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* ============ 配置 ============ */
+const SUPABASE_URL='https://eyivdjgaziepvhuxtrma.supabase.co';
+const SUPABASE_KEY='sb_publishable_S-jg61KZdUmbyTStoPv6DQ_2l_0Oxfb';
+const SB=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+const TYPE_LABEL={single:'单选题',multiple:'多选题',judge:'判断题',fill:'填空题',order:'排序题'};
+const LETTERS='ABCDEFGH';
+
+/* ============ utils ============ */
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function escAttr(s){return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function show(v){['quiz-entry','quiz','result'].forEach(x=>{const el=document.getElementById('view-'+x);if(el)el.classList.toggle('hidden',x!==v);});document.getElementById('loading').classList.add('hidden');window.scrollTo(0,0);}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
+
+let SETTINGS={title:'岗位测评',desc:'',pass:60,showscore:1,shuffle:0,timelimit:0,groups:[]}, rosterEmpty=false;
+let currentTaker=null, quizList=[], timerInt=null, timeLeft=0;
+function shuffleArr(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+/* ============ entry ============ */
+async function setupEntry(){
+  try{
+    const {data:s}=await SB.from('app_settings').select('*').eq('id',1).single();
+    if(s) SETTINGS={title:s.title||'岗位测评',desc:s.descr||'',pass:s.pass??60,showscore:s.showscore??1,shuffle:s.shuffle??0,timelimit:s.timelimit??0,groups:s.groups||[]};
+    const re=await SB.rpc('roster_empty'); rosterEmpty=!!(re.data);
+  }catch(e){ toast('连接数据库失败，请检查网络'); }
+  document.title=SETTINGS.title+' · 答题';
+  document.getElementById('quiz-entry-title').textContent=SETTINGS.title;
+  document.getElementById('quiz-title').textContent=SETTINGS.title;
+  document.getElementById('quiz-entry-desc').textContent=SETTINGS.desc||'';
+  document.getElementById('taker-name').value='';
+  document.getElementById('taker-id').value='';
+  const gw=document.getElementById('taker-group-wrap');
+  gw.classList.toggle('hidden',!rosterEmpty);
+  if(rosterEmpty){
+    document.getElementById('taker-group').innerHTML=(SETTINGS.groups||[]).map(g=>'<option value="'+escAttr(g)+'">'+esc(g)+'</option>').join('');
+    document.getElementById('taker-hint').textContent='（名单未导入）请选择你的分组、并务必填写工号后答题。';
+  }else{
+    document.getElementById('taker-hint').textContent='系统将根据名单自动匹配你的分组，只显示本组题目。';
+  }
+  show('quiz-entry');
+}
+function restart(){ clearInterval(timerInt); setupEntry(); }
+
+/* ============ quiz ============ */
+async function startQuiz(){
+  const name=document.getElementById('taker-name').value.trim();
+  if(!name){toast('请填写姓名');return;}
+  const empid=document.getElementById('taker-id').value.trim();
+  const btn=document.getElementById('start-btn'); btn.disabled=true; btn.textContent='加载中…';
+  try{
+    let group;
+    if(rosterEmpty){
+      group=document.getElementById('taker-group').value;
+      if(!group){toast('请选择分组');return;}
+      if(!empid){toast('自选分组时必须填写工号，以区分同名人员');return;}
+    }else{
+      const {data,error}=await SB.rpc('lookup_group',{p_name:name,p_empid:empid});
+      if(error){toast('查询失败：'+error.message);return;}
+      if(!data){toast('未在名单中找到你的信息，请联系管理员');return;}
+      group=data;
+    }
+    const {data:qs,error:qe}=await SB.from('public_questions').select('*').eq('grp',group).order('sort');
+    if(qe){toast('题目加载失败：'+qe.message);return;}
+    if(!qs||qs.length===0){toast('「'+group+'」组暂无题目，请联系管理员');return;}
+    quizList=qs.map(r=>({id:r.id,group:r.grp,type:r.type,title:r.title,options:r.options||[]}));
+    if(SETTINGS.shuffle) shuffleArr(quizList);
+    quizList.forEach(q=>{ q.disp=(q.options||[]).map((_,i)=>i); if(SETTINGS.shuffle) shuffleArr(q.disp); });
+    currentTaker={name,empid,group};
+    document.getElementById('quiz-who').textContent='答题人：'+name+'（'+group+'）';
+    renderQuiz();
+    show('quiz');
+  }finally{ btn.disabled=false; btn.textContent='开始答题 →'; }
+}
+function renderQuiz(){
+  const pts=Math.round(100/quizList.length*10)/10;
+  document.getElementById('quiz-questions').innerHTML=quizList.map((q,i)=>{
+    let body='';
+    if(q.type==='single'||q.type==='multiple'){
+      body=q.disp.map((oi,pos)=>'<label class="choice" onclick="toggleChoice(this)"><input type="'+(q.type==='single'?'radio':'checkbox')+'" name="q-'+q.id+'" value="'+oi+'"><span>'+LETTERS[pos]+'. '+esc(q.options[oi].text)+'</span></label>').join('');
+    }else if(q.type==='order'){
+      const n=q.options.length;
+      body='<div class="qmark" style="margin-bottom:8px">请为每个选项选择正确的先后位置</div>'+q.disp.map((oi,pos)=>{
+        let sel='<select class="ord-sel" name="q-'+q.id+'-'+oi+'" onchange="refreshProgress()"><option value="">第几位</option>';
+        for(let p=1;p<=n;p++) sel+='<option value="'+p+'">第 '+p+' 位</option>';
+        return '<div class="choice" style="cursor:default"><span>'+LETTERS[pos]+'. '+esc(q.options[oi].text)+'</span>'+sel+'</select></div>';
+      }).join('');
+    }else if(q.type==='judge'){
+      body=['对','错'].map(v=>'<label class="choice" onclick="toggleChoice(this)"><input type="radio" name="q-'+q.id+'" value="'+v+'"><span>'+v+'</span></label>').join('');
+    }else if(q.type==='fill'){
+      body='<input type="text" name="q-'+q.id+'" placeholder="请输入答案" oninput="refreshProgress()">';
+    }
+    const clearable=(q.type==='single'||q.type==='judge');
+    return '<div class="card" id="qc-'+q.id+'"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px">'+
+      '<div><span class="tag">'+TYPE_LABEL[q.type]+'</span><span class="tag score">'+pts+'分</span><br><strong>'+(i+1)+'. '+esc(q.title)+'</strong></div>'+
+      '<span class="qstatus todo" id="st-'+q.id+'">⬜ 未作答</span></div>'+body+
+      (clearable?'<button class="link" style="margin-top:6px" onclick="clearAnswer(\''+q.id+'\')">清除 / 标记不确定</button>':'')+'</div>';
+  }).join('');
+  refreshProgress();
+  startTimer();
+}
+function startTimer(){
+  clearInterval(timerInt);
+  const tEl=document.getElementById('quiz-timer');
+  if(!SETTINGS.timelimit||SETTINGS.timelimit<=0){ if(tEl)tEl.classList.add('hidden'); return; }
+  timeLeft=SETTINGS.timelimit*60;
+  tEl.classList.remove('hidden');
+  const tick=()=>{
+    const m=Math.floor(timeLeft/60), s=timeLeft%60;
+    tEl.textContent='⏱ '+m+':'+String(s).padStart(2,'0');
+    tEl.style.color = timeLeft<=60 ? 'var(--bad)' : 'var(--muted)';
+    if(timeLeft<=0){ clearInterval(timerInt); toast('时间到，已自动交卷'); submitQuiz(true); return; }
+    timeLeft--;
+  };
+  tick(); timerInt=setInterval(tick,1000);
+}
+function toggleChoice(label){
+  const input=label.querySelector('input');
+  if(input.type==='radio'){document.getElementsByName(input.name).forEach(r=>r.closest('.choice').classList.remove('sel'));input.checked=true;label.classList.add('sel');}
+  else{setTimeout(()=>label.classList.toggle('sel',input.checked),0);}
+  refreshProgress();
+}
+function clearAnswer(id){document.getElementsByName('q-'+id).forEach(r=>{r.checked=false;const c=r.closest('.choice');if(c)c.classList.remove('sel');});refreshProgress();}
+function isAnswered(q){
+  if(q.type==='order'){for(let j=0;j<q.options.length;j++){const el=document.getElementsByName('q-'+q.id+'-'+j)[0];if(!el||!el.value)return false;}return true;}
+  if(q.type==='fill'){const el=document.getElementsByName('q-'+q.id)[0];return !!(el&&el.value.trim());}
+  let a=false;document.getElementsByName('q-'+q.id).forEach(r=>{if(r.checked)a=true});return a;
+}
+function refreshProgress(){
+  let done=0;
+  quizList.forEach(q=>{const ans=isAnswered(q);if(ans)done++;
+    const st=document.getElementById('st-'+q.id);if(st){st.textContent=ans?'✅ 已作答':'⬜ 未作答';st.className='qstatus '+(ans?'done':'todo');}
+    const c=document.getElementById('qc-'+q.id);if(c)c.classList.toggle('answered',ans);});
+  const n=quizList.length;
+  document.getElementById('progress-fill').style.width=(n?done/n*100:0)+'%';
+  document.getElementById('progress-text').textContent='已完成 '+done+' / '+n+' 题';
+}
+function collectAnswer(q){
+  if(q.type==='single'){let v=null;document.getElementsByName('q-'+q.id).forEach(r=>{if(r.checked)v=parseInt(r.value)});return v;}
+  if(q.type==='judge'){let v=null;document.getElementsByName('q-'+q.id).forEach(r=>{if(r.checked)v=r.value});return v;}
+  if(q.type==='multiple'){const a=[];document.getElementsByName('q-'+q.id).forEach(r=>{if(r.checked)a.push(parseInt(r.value))});return a.length?a:null;}
+  if(q.type==='order'){const n=q.options.length;const seq=new Array(n).fill(null);for(let j=0;j<n;j++){const el=document.getElementsByName('q-'+q.id+'-'+j)[0];const p=el?parseInt(el.value):NaN;if(p>=1&&p<=n)seq[p-1]=j;}return seq;}
+  if(q.type==='fill'){const el=document.getElementsByName('q-'+q.id)[0];return el?el.value.trim():'';}
+  return null;
+}
+async function submitQuiz(auto){
+  if(!auto){
+    const undone=quizList.filter(q=>!isAnswered(q)).length;
+    if(undone>0 && !confirm('还有 '+undone+' 题未作答，确定提交吗？')) return;
+  }
+  clearInterval(timerInt);
+  const answers={};
+  quizList.forEach(q=>{const a=collectAnswer(q);if(a!==null&&a!=='')answers[q.id]=a;});
+  const btn=document.getElementById('submit-btn');btn.disabled=true;btn.textContent='提交中…';
+  try{
+    const {data,error}=await SB.rpc('submit_quiz',{p_name:currentTaker.name,p_empid:currentTaker.empid,p_group:currentTaker.group,p_answers:answers});
+    if(error){toast(error.message||'提交失败');return;}
+    showResult(data);
+  }finally{btn.disabled=false;btn.textContent='提交答卷';}
+}
+function showResult(d){
+  const pass=d.score>=SETTINGS.pass;
+  if(parseInt(SETTINGS.showscore)===0){
+    document.getElementById('result-banner').innerHTML='<div class="result-banner" style="background:#eef3ff"><div style="font-size:40px">✅</div><h2 style="margin:8px 0 0">提交成功</h2><p class="muted">感谢 '+esc(currentTaker.name)+' 完成测评</p></div>';
+    document.getElementById('result-detail').innerHTML='';show('result');return;
+  }
+  document.getElementById('result-banner').innerHTML='<div class="result-banner" style="background:'+(pass?'#ecfdf3':'#fef2f2')+'">'+
+    '<div class="muted">'+esc(currentTaker.name)+' 的成绩</div>'+
+    '<div class="score" style="color:'+(pass?'var(--ok)':'var(--bad)')+'">'+d.score+'<span style="font-size:22px;color:var(--muted)"> / '+d.total+'</span></div>'+
+    '<span class="pill '+(pass?'pass':'fail')+'">'+(pass?'及格':'未及格')+'（及格线 '+SETTINGS.pass+'）</span></div>';
+  const map={};quizList.forEach((q,i)=>map[q.id]={t:q.title,n:i+1,type:q.type});
+  document.getElementById('result-detail').innerHTML=(d.detail||[]).map(x=>{
+    const q=map[x.id]||{t:'',n:''};
+    return '<div class="card"><div style="margin-bottom:6px"><span class="tag">'+(TYPE_LABEL[q.type]||'')+'</span><strong>'+q.n+'. '+esc(q.t)+'</strong></div>'+
+      '<div class="ans-fb '+(x.correct?'ok':'no')+'">'+(x.correct?'✓ 回答正确':'✗ 回答错误')+'</div></div>';
+  }).join('');
+  show('result');
+}
+
+/* ============ init ============ */
+setupEntry();
+</script>
+</body>
+</html>
