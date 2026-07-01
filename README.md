@@ -37,20 +37,20 @@ git add .
 git commit -m "岗位测评平台上线"
 
 # 3. 一条命令创建仓库并推送（公开仓库）
-gh repo create gangwei-ceping --public --source=. --push
+gh repo create job-assessment --public --source=. --push
 
 # 4. 开启 GitHub Pages
-gh api -X POST repos/{owner}/gangwei-ceping/pages -f 'source[branch]=main' -f 'source[path]=/' 2>/dev/null || \
+gh api -X POST repos/{owner}/job-assessment/pages -f 'source[branch]=main' -f 'source[path]=/' 2>/dev/null || \
   echo "若上面报错，就到仓库网页 Settings → Pages → Branch 选 main → Save"
 ```
 
 几分钟后访问：
-- 答题端：`https://你的用户名.github.io/gangwei-ceping/`
-- 管理后台：`https://你的用户名.github.io/gangwei-ceping/admin.html`
+- 答题端：`https://你的用户名.github.io/job-assessment/`
+- 管理后台：`https://你的用户名.github.io/job-assessment/admin.html`
 
 ## 方式二：网页上传（不想用命令行）
 
-1. 打开 https://github.com/new 建一个仓库（如 `gangwei-ceping`，选 Public）
+1. 打开 https://github.com/new 建一个仓库（如 `job-assessment`，选 Public）
 2. 在仓库页点 **Add file → Upload files**，把本文件夹里的 `index.html` 和 `admin.html` 拖进去 → Commit
 3. **Settings → Pages → Branch 选 `main` → Save**
 4. 等几分钟，页面上会显示两个网址（同上）
