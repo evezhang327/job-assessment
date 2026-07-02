@@ -102,12 +102,13 @@ button.sm:not(.ghost):not(.danger){box-shadow:0 1px 5px rgba(58,99,240,.25)}
 button:disabled{opacity:.5;cursor:not-allowed;filter:none !important;transform:none !important;box-shadow:none !important}
 /* ---------- Forms ---------- */
 label{display:block;font-size:13px;font-weight:600;color:var(--ink);margin:0 0 6px}
-input,select,textarea{
+input:not([type=radio]):not([type=checkbox]),select,textarea{
   width:100%;font-family:inherit;font-size:15px;color:var(--ink);
   background:var(--card-2);border:1px solid var(--line);border-radius:var(--r-sm);
   padding:11px 13px;transition:border-color .15s ease, box-shadow .15s ease, background .15s ease;
   -webkit-appearance:none;appearance:none;
 }
+input[type=radio],input[type=checkbox]{accent-color:var(--brand);cursor:pointer}
 textarea{min-height:96px;resize:vertical;line-height:1.55}
 select{
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%2369748a' d='M1 1l5 5 5-5'/></svg>");
@@ -205,8 +206,22 @@ code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,"Liberation Mono",monospa
 /* ============================================================
    MOBILE (≤560px)
    ============================================================ */
+/* 答题卡（快捷选题） */
+#qnav{margin:0 0 16px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-sm);padding:12px 14px}
+.qnav-title{font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px}
+.qnav-grid{display:flex;flex-wrap:wrap;gap:8px}
+.qnav-chip{width:38px;height:38px;min-height:0;padding:0;border-radius:9px;font-weight:700;font-size:14px;background:var(--card);border:1.5px solid var(--line);color:var(--muted);box-shadow:none;transition:transform .1s ease,background .12s ease,border-color .12s ease}
+.qnav-chip:hover{transform:translateY(-1px);filter:none}
+.qnav-chip.done{background:var(--ok-soft);border-color:#bfe6cb;color:var(--ok)}
+.qnav-chip.todo{background:var(--warn-soft);border-color:#f4dcb4;color:var(--warn)}
+@media (min-width:1130px){
+  #qnav{position:fixed;left:16px;top:88px;width:88px;margin:0;max-height:76vh;overflow:auto;z-index:30}
+  .qnav-grid{gap:6px}
+  .qnav-chip{width:34px;height:34px}
+}
 @media (max-width:560px){
   :root{--fs:16px;--r:12px}
+  .qnav-chip{width:36px;height:36px}
   .wrap{padding:14px 14px 56px}
   .topbar{border-radius:0;margin:-14px -14px 16px;padding:12px 14px;border-left:none;border-right:none;border-top:none}
   h1{font-size:19px}
@@ -254,6 +269,7 @@ code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,"Liberation Mono",monospa
   <section id="view-quiz" class="hidden">
     <div class="topbar"><div class="brand"><span class="logo">✍️</span><span id="quiz-title">岗位测评</span></div><span class="muted" id="quiz-who"></span></div>
     <div id="quiz-progress"><span id="progress-text">已完成 0 / 0 题</span><div class="ptrack"><div class="pfill" id="progress-fill"></div></div><span id="quiz-timer" class="hidden" style="font-weight:700;font-size:14px;white-space:nowrap;color:var(--muted)"></span></div>
+    <div id="qnav" class="hidden"></div>
     <div id="quiz-questions"></div>
     <button id="submit-btn" onclick="submitQuiz()" style="width:100%;padding:14px">提交答卷</button>
   </section>
@@ -383,9 +399,17 @@ function renderQuiz(){
       '<span class="qstatus todo" id="st-'+q.id+'">⬜ 未作答</span></div>'+stemImgs+body+
       (clearable?'<button class="link" style="margin-top:6px" onclick="clearAnswer(\''+q.id+'\')">清除 / 标记不确定</button>':'')+'</div>';
   }).join('');
+  buildQNav();
   refreshProgress();
   startTimer();
 }
+function buildQNav(){
+  const nav=document.getElementById('qnav'); if(!nav) return;
+  nav.classList.remove('hidden');
+  nav.innerHTML='<div class="qnav-title">答题卡（点题号可跳转）</div><div class="qnav-grid">'+
+    quizList.map((q,i)=>'<button type="button" class="qnav-chip todo" id="qn-'+q.id+'" onclick="jumpTo(\''+q.id+'\')">'+(i+1)+'</button>').join('')+'</div>';
+}
+function jumpTo(id){ const el=document.getElementById('qc-'+id); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
 function startTimer(){
   clearInterval(timerInt);
   const tEl=document.getElementById('quiz-timer');
@@ -418,7 +442,8 @@ function refreshProgress(){
   let done=0;
   quizList.forEach(q=>{const ans=isAnswered(q);if(ans)done++;
     const st=document.getElementById('st-'+q.id);if(st){st.textContent=ans?'✅ 已作答':'⬜ 未作答';st.className='qstatus '+(ans?'done':'todo');}
-    const c=document.getElementById('qc-'+q.id);if(c)c.classList.toggle('answered',ans);});
+    const c=document.getElementById('qc-'+q.id);if(c)c.classList.toggle('answered',ans);
+    const chip=document.getElementById('qn-'+q.id);if(chip){chip.classList.toggle('done',ans);chip.classList.toggle('todo',!ans);}});
   const n=quizList.length;
   document.getElementById('progress-fill').style.width=(n?done/n*100:0)+'%';
   document.getElementById('progress-text').textContent='已完成 '+done+' / '+n+' 题';
@@ -457,12 +482,8 @@ function showResult(d){
     '<div class="muted">'+esc(currentTaker.name)+' 的成绩</div>'+
     '<div class="score" style="color:'+(pass?'var(--ok)':'var(--bad)')+'">'+d.score+'<span style="font-size:22px;color:var(--muted)"> / '+d.total+'</span></div>'+
     '<span class="pill '+(pass?'pass':'fail')+'">'+(pass?'及格':'未及格')+'（及格线 '+SETTINGS.pass+'）</span></div>';
-  const map={};quizList.forEach((q,i)=>map[q.id]={t:q.title,n:i+1,type:q.type});
-  document.getElementById('result-detail').innerHTML=(d.detail||[]).map(x=>{
-    const q=map[x.id]||{t:'',n:''};
-    return '<div class="card"><div style="margin-bottom:6px"><span class="tag">'+(TYPE_LABEL[q.type]||'')+'</span><strong>'+q.n+'. '+esc(q.t)+'</strong></div>'+
-      '<div class="ans-fb '+(x.correct?'ok':'no')+'">'+(x.correct?'✓ 回答正确':'✗ 回答错误')+'</div></div>';
-  }).join('');
+  // 只给分数，不再逐题列出对错
+  document.getElementById('result-detail').innerHTML='';
   show('result');
 }
 

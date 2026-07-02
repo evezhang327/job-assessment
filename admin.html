@@ -102,12 +102,13 @@ button.sm:not(.ghost):not(.danger){box-shadow:0 1px 5px rgba(58,99,240,.25)}
 button:disabled{opacity:.5;cursor:not-allowed;filter:none !important;transform:none !important;box-shadow:none !important}
 /* ---------- Forms ---------- */
 label{display:block;font-size:13px;font-weight:600;color:var(--ink);margin:0 0 6px}
-input,select,textarea{
+input:not([type=radio]):not([type=checkbox]),select,textarea{
   width:100%;font-family:inherit;font-size:15px;color:var(--ink);
   background:var(--card-2);border:1px solid var(--line);border-radius:var(--r-sm);
   padding:11px 13px;transition:border-color .15s ease, box-shadow .15s ease, background .15s ease;
   -webkit-appearance:none;appearance:none;
 }
+input[type=radio],input[type=checkbox]{accent-color:var(--brand);cursor:pointer}
 textarea{min-height:96px;resize:vertical;line-height:1.55}
 select{
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%2369748a' d='M1 1l5 5 5-5'/></svg>");
