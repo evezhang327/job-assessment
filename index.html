@@ -305,7 +305,7 @@ async function setupEntry(){
     document.getElementById('taker-group').innerHTML=(SETTINGS.groups||[]).map(g=>'<option value="'+escAttr(g)+'">'+esc(g)+'</option>').join('');
     document.getElementById('taker-hint').textContent='（名单未导入）请选择你的分组、并务必填写工号后答题。';
   }else{
-    document.getElementById('taker-hint').textContent='系统将根据名单自动匹配你的分组，只显示本组题目。';
+    document.getElementById('taker-hint').textContent='填工号最准；也可只填姓名（中文名 / 英文名 / 花名 任一种都行），系统会自动匹配你的分组。';
   }
   show('quiz-entry');
 }
