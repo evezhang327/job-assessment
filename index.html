@@ -381,9 +381,44 @@ async function startQuiz(){
     });
     currentTaker={name,empid,group};
     document.getElementById('quiz-who').textContent='答题人：'+name+'（'+group+'）';
+    let _savedDraft=null; try{ _savedDraft=JSON.parse(localStorage.getItem(draftKey(currentTaker))||'null'); }catch(_){}  // 必须在 renderQuiz(会触发空草稿保存) 之前读取
     renderQuiz();
     show('quiz');
+    maybeRestoreDraft(_savedDraft);
   }finally{ btn.disabled=false; btn.textContent='开始答题 →'; }
+}
+/* ===== 作答中断记忆：草稿存本地(localStorage) ===== */
+function draftKey(t){ return 'jaq_draft:'+(t.group||'')+':'+(t.name||'')+':'+(t.empid||''); }
+function saveDraft(){
+  if(!currentTaker||!quizList.length) return;
+  const answers={};
+  quizList.forEach(q=>{const a=collectAnswer(q); if(a!==null&&a!=='') answers[q.id]=a;});
+  try{ localStorage.setItem(draftKey(currentTaker), JSON.stringify({answers,savedAt:Date.now()})); }catch(_){}
+}
+function clearDraft(){ if(currentTaker){ try{ localStorage.removeItem(draftKey(currentTaker)); }catch(_){} } }
+function maybeRestoreDraft(d){
+  if(!d||!d.answers||!Object.keys(d.answers).length) return;
+  if(Date.now()-(d.savedAt||0) > 7*86400000){ clearDraft(); return; }  // 超过7天的草稿丢弃
+  if(!confirm('检测到你上次未完成的作答，是否继续上次进度？\n（点“取消”将重新开始）')){ clearDraft(); return; }
+  applyAnswers(d.answers); refreshProgress();
+  toast('已恢复上次进度');
+}
+function applyAnswers(ans){
+  quizList.forEach(q=>{
+    const a=ans[q.id]; if(a===undefined) return;
+    if(q.type==='single'||q.type==='judge'){
+      const el=[...document.getElementsByName('q-'+q.id)].find(r=>(q.type==='single'?+r.value===a:r.value===a));
+      if(el){el.checked=true; const c=el.closest('.choice'); if(c)c.classList.add('sel');}
+    }else if(q.type==='multiple'){
+      (a||[]).forEach(v=>{const el=[...document.getElementsByName('q-'+q.id)].find(r=>+r.value===v); if(el){el.checked=true; const c=el.closest('.choice'); if(c)c.classList.add('sel');}});
+    }else if(q.type==='fill'){
+      const el=document.getElementsByName('q-'+q.id)[0]; if(el) el.value=a;
+    }else if(q.type==='order'){
+      const z=document.getElementById('oz-'+q.id); if(z){ (a||[]).forEach(oi=>{const chip=document.querySelector('.opt-chip[data-q="'+q.id+'"][data-oi="'+oi+'"]'); if(chip) z.appendChild(chip);}); markTouched(q.id); }
+    }else if(q.type==='match'){
+      const box=document.getElementById('match-'+q.id); if(box){ box._conn={}; (a||[]).forEach((ri,li)=>{ if(ri>=0) box._conn[li]=ri; }); drawMatch(box); }
+    }
+  });
 }
 function renderQuiz(){
   TOUCHED.clear();
@@ -566,6 +601,7 @@ function refreshProgress(){
   const n=quizList.length;
   document.getElementById('progress-fill').style.width=(n?done/n*100:0)+'%';
   document.getElementById('progress-text').textContent='已完成 '+done+' / '+n+' 题';
+  saveDraft();
 }
 function collectAnswer(q){
   if(q.type==='single'){let v=null;document.getElementsByName('q-'+q.id).forEach(r=>{if(r.checked)v=parseInt(r.value)});return v;}
@@ -588,6 +624,7 @@ async function submitQuiz(auto){
   try{
     const {data,error}=await SB.rpc('submit_quiz',{p_name:currentTaker.name,p_empid:currentTaker.empid,p_group:currentTaker.group,p_answers:answers});
     if(error){toast(error.message||'提交失败');return;}
+    clearDraft();   // 提交成功后清掉本地草稿
     showResult(data);
   }finally{btn.disabled=false;btn.textContent='提交答卷';}
 }
